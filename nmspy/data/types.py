@@ -2448,6 +2448,12 @@ class cGcFrontendPage(Structure):
     # This is probably a cGcNGui
     # Found in cGcFrontendPageOptions::DoGameSwitcher
     mRootNode: Annotated[_Pointer[cGcNGuiLayer], 0x14468]
+    # Current inventory filter (eInventoryFilter / cGcInventoryFilterOptions), a dword.
+    # Recovery (Experimental 180836): internal DoInventorySlots filter-test site FILTER_SIG
+    # `41 8B 44 24 24 32 DB 44 8B B7 ?? ?? ?? ??` @ ~0x6b6470.
+    # `44 8B B7` is mov r14d, [rdi+disp32]; disp32 is 0x1444C (was +0x1443C on older builds).
+    # Not a separate export. meSelectedInventoryFilter is the name from the frontend page struct.
+    meSelectedInventoryFilter: Annotated[c_enum32[enums.cGcInventoryFilterOptions], 0x1444C]
 
     @function_hook("48 89 6C 24 ? 41 54 41 56 41 57 48 83 EC ? 80 B9")
     def Confirm(
@@ -4410,6 +4416,9 @@ class cGcFrontendPageFunctions(Structure):
     ) -> c_uint64:  # cGcNGuiLayer *
         ...
 
+    # FILTER_SIG is an internal site in this function (~0x6b6470 on 180836), not its own export.
+    # It loads cGcFrontendPage.meSelectedInventoryFilter (+0x1444C):
+    # 41 8B 44 24 24 32 DB 44 8B B7 ?? ?? ?? ??
     @static_function_hook("48 85 D2 0F 84 ? ? ? ? 48 8B C4 4C 89 48 ? 4C 89 40")
     @staticmethod
     def DoInventorySlots(
@@ -4454,6 +4463,81 @@ class cGcFrontendPageFunctions(Structure):
         lpPageGroup: c_uint64,  # cGcFrontendManager::PageGroup *
         lbActive: Annotated[bool, c_bool],
     ): ...
+
+
+# Bigger Item Grids hooks. Patterns below are the ones verified unique on Experimental
+# NMS.exe ProductVersion 180836. Mangled names are omitted: they were not recovered from a
+# PDB, the mac binary, or the 4.13 binary. Owning classes are unknown, so these are
+# signature hooks rather than methods on a guessed class.
+# TODO: OwnedLists (OWNED_LISTS_SIG, ~0x5b4600) and the Base helper (BASE_SIG, ~0x6bbaad)
+# are only referenced from storage_craft.py, and the dig-resource award helper (AWARD_SIG)
+# from mining.py. Those full patterns were not in the hook brief, so they are omitted
+# instead of invented. cGcTerrainEditorBeam::ApplyTerrainEditStroke is already hooked.
+
+
+# CHOICES_SIG. Spills rcx and edx, reads a qword at r8+8, zero-extends r9b. C++ prototype TODO.
+@static_function_hook(
+    "89 54 24 10 48 89 4C 24 08 55 53 56 57 41 57 48 8B EC 48 81 EC 80 00 00 00 49 8B 40 08 "
+    "49 8D 70 08 49 8B D8 41 0F B6 F9"
+)
+def CraftingInventoryChoices(
+    a1: c_uint64,
+    a2: Annotated[int, c_int32],
+    a3: c_uint64,
+    a4: Annotated[int, c_uint8],
+): ...
+
+
+# Large frame. The visible prologue writes r9d = 4; that is an immediate, not a recovered argument.
+@static_function_hook(
+    "48 8B C4 55 56 48 8D A8 D8 FA FF FF 48 81 EC 18 06 00 00 48 89 58 08 41 B9 04 00 00"
+)
+def BuildAfford(): ...
+
+
+# Spills edx. Remaining prototype TODO.
+@static_function_hook(
+    "48 8B C4 89 50 10 55 57 41 57 48 8D A8 C8 FA FF FF 48 81 EC 20 06 00 00 48 89 58 08 41 B9 "
+    "04 00 00 00"
+)
+def BuildPay(): ...
+
+
+# rcx is a large object (lea from +0x900). rdx has a dword at +4 and a qword at +8. r8 is saved.
+@static_function_hook(
+    "40 53 48 83 EC 50 4C 8B 4A 08 4C 8D 91 00 09 00 00 8B 42 04 0F 57 C0 49 8B D8 0F 11"
+)
+def CountInChoices(a1: c_uint64, a2: c_uint64, a3: c_uint64): ...
+
+
+@static_function_hook(
+    "4C 8B DC 49 89 6B 10 49 89 73 18 49 89 7B 20 41 54 41 56 41 57 48 81 EC B0 00 00 00"
+)
+def RemoveFromChoices(): ...
+
+
+# ~0x6c3ae0 on 180836. Spills rcx and rdx. C++ prototype TODO.
+@static_function_hook(
+    "48 8B C4 48 89 50 10 48 89 48 08 55 48 8D A8 B8 F8 FF FF 48 81 EC 40 08 00 00 48 89 58 "
+    "F0 48 89 70 E8 4C 89 60 D8 4C 8B E2 4C 89 68 D0 4C 8B E9"
+)
+def ChargePopup(a1: c_uint64, a2: c_uint64): ...
+
+
+# Clears the first 16 bytes at rdx (empty out-list) before using rcx and r8.
+@static_function_hook(
+    "40 55 57 41 54 41 55 41 57 48 81 EC B0 00 00 00 4D 8B F8 48 C7 02 00 00 00 00 48 8B FA "
+    "48 C7 42 08 00 00 00 00 48 8B E9 E8"
+)
+def ItemSources(a1: c_uint64, a2: c_uint64, a3: c_uint64): ...
+
+
+# rcx, rdx, r8, and r9 are all live. C++ prototype TODO.
+@static_function_hook(
+    "48 89 5C 24 ? 48 89 74 24 ? 55 41 56 41 57 48 8B EC 48 81 EC ? ? ? ? 48 8B DA 4C 8B F9 "
+    "49 8B D1 49 8B C8 49 8B F1 4D 8B F0 E8"
+)
+def QuickTransferToTarget(a1: c_uint64, a2: c_uint64, a3: c_uint64, a4: c_uint64): ...
 
 
 class cTkSystem(Structure):

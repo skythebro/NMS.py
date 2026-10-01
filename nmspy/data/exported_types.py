@@ -23175,6 +23175,9 @@ class cGcProductData(Structure):
     RecipeCost: Annotated[int, Field(ctypes.c_int32, 0x1DC)]
     StackMultiplier: Annotated[int, Field(ctypes.c_int32, 0x1E0)]
     TradeCategory: Annotated[c_enum32[enums.cGcTradeCategory], 0x1E4]
+    # Product category (cGcProductCategory) at +0x1E8 on 180836. Inventory filter logic compares this.
+    # Recovery: product lookup from the DoInventorySlots FILTER_SIG site
+    # (see cGcFrontendPage.meSelectedInventoryFilter). MBIN name is Type.
     Type: Annotated[c_enum32[enums.cGcProductCategory], 0x1E8]
 
     class eWikiCategoryEnum(IntEnum):
